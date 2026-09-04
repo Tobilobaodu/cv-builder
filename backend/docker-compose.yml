@@ -29,14 +29,14 @@ services:
     restart: unless-stopped
 
   # PostgreSQL 15+ with health check per spec
+  # No published port: reachable as postgres:5432 over the compose network.
+  # Publishing to the host clashed with Temps' own TimescaleDB on 5432.
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cvapp}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cvapp_local}
       POSTGRES_DB: ${POSTGRES_DB:-cv_tailoring}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Only runs on a fresh volume — creates cv_tailoring_test alongside the
@@ -111,10 +111,10 @@ services:
   #      - no_internet
 
   # Redis for Celery broker and cache
+  # No published port: reachable as redis:6379 over the compose network.
+  # Publishing to the host clashed with the Temps-managed Redis service.
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -146,10 +146,10 @@ services:
       - no_internet
 
   # ClamAV for malware scanning
+  # No published port: worker_text_extract reaches clamd at clamav:3310
+  # over the compose network. Nothing on the host needs it.
   clamav:
     image: clamav/clamav:latest
-    ports:
-      - "3310:3310"
     environment:
       CLAMAV_NO_FRESHCLAMD: "false"
     volumes:
@@ -556,9 +556,13 @@ services:
       - ./app:/app/app:ro
     restart: unless-stopped
     # Only ever touches the DB via internal deletes on expired rows —
-    # no external input, no outbound network need. Deny-all egress.
+    # no external input, no outbound network need. Deny-all egress, so
+    # no_internet ONLY: being multi-homed on `default` as well would let
+    # traffic route out via `default`'s gateway regardless of
+    # no_internet's `internal: true` — see worker_docling's comment.
+    # postgres and redis are both multi-homed onto no_internet, so this
+    # worker still reaches everything it needs.
     networks:
-      - default
       - no_internet
 
   # Celery worker — free-API job feed refresh (item 7). Needs public
