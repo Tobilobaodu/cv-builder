@@ -1,0 +1,147 @@
+# Alert rules — the 5 attack patterns security-plan §10 explicitly names,
+# plus one added post-Sprint-6 (CostSpikeSuspect, at explicit request).
+#
+# These are deliberately written against the counter metrics added in
+# app/core/metrics.py (Sprint 6, Workstream H), which increment at the real
+# chokepoints (not per-route). "An alert that's configured but never verified
+# to trigger is not a real control" — see Workstream H's live-fire step; the
+# thresholds below are provisional starting points to be tuned against real
+# traffic once a baseline exists (§10 "Checks and balances").
+#
+# Post-sign-off live-fire correction: SsrfProbingSuspect and
+# GenerationValidationSpike depend on counters that only ever increment in
+# Celery worker processes, which Prometheus doesn't scrape directly — they
+# now reach Prometheus via Pushgateway (app/core/metrics_push.py). Queue
+# depth (below) was rewritten from a counter/label pair that was never
+# actually emitted to a gauge kept current by the API process itself.
+
+groups:
+  - name: security
+    rules:
+      # 1. Repeated 401s from one IP/account in a window — credential stuffing.
+      - alert: CredentialStuffingSuspect
+        expr: sum by (reason) (rate(auth_failures_total[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Repeated authentication failures (possible credential stuffing)"
+          description: "auth_failures_total is rising at {{ $value }}/s for reason {{ $labels.reason }}."
+
+      # 2. Repeated 404s against owned-resource routes from one account — IDOR probing.
+      - alert: IdorProbingSuspect
+        expr: rate(authz_denied_total[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Repeated cross-user resource denials (possible IDOR probing)"
+          description: "authz_denied_total rising at {{ $value }}/s — an account is 404ing on resources it doesn't own."
+
+      # 3. Unusual SSRF-fetch rejection volume.
+      - alert: SsrfProbingSuspect
+        expr: rate(ssrf_rejected_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusual SSRF validation rejection volume"
+          description: "ssrf_rejected_total rising at {{ $value }}/s — possible SSRF probing of the job-URL fetch path."
+
+      # 4. Spike in generation schema-validation failures — possible injection.
+      - alert: GenerationValidationSpike
+        expr: rate(generation_schema_validation_failed_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spike in generation schema-validation failures (possible prompt injection)"
+          description: "generation_schema_validation_failed_total rising at {{ $value }}/s."
+
+      # 5. Unusual queue depth. Originally written against
+      #    processing_jobs_total{status="queued"} — a live-fire check found
+      #    that label value is never actually emitted (the counter only ever
+      #    increments with status="completed"/"failed"), so the rule could
+      #    never have fired regardless of real load. Rewritten against
+      #    processing_queue_depth, a gauge kept current from the database by
+      #    the API process itself (app/main.py's _poll_queue_depth).
+      - alert: QueueDepthSpike
+        expr: sum by (job_type) (processing_queue_depth) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusual queue depth / job volume"
+          description: "processing_queue_depth is {{ $value }} for {{ $labels.job_type }} — possible abuse/DoS or a stuck consumer."
+
+      # 5b. A queue has work but no consumer. QueueDepthSpike above cannot
+      #     catch this: it needs depth > 5 sustained for 10m, but a single
+      #     stuck job is depth 1 and sits there forever, silently. The
+      #     failure mode is invisible from every other signal — the API
+      #     returned 202, the broker holds the message, the job row reads
+      #     "pending" with no error, and the UI spins indefinitely.
+      #     Confirmed live twice in one session (worker_textract, then
+      #     worker_cv_generate); both were diagnosed only by reading
+      #     `docker ps` by hand.
+      #
+      #     recover_stalled_jobs does not cover it either — it republishes
+      #     to the same queue, which with no consumer re-queues into the
+      #     same void.
+      #
+      #     `== 0` is deliberate, not `< 1`: the gauge reports -1 when the
+      #     control-plane poll itself failed (broker unreachable, inspect
+      #     timeout), and an unknown must not page as a missing worker.
+      #     `for: 2m` clears the normal case of a worker restarting or a
+      #     deploy rolling.
+      - alert: QueueHasNoConsumer
+        expr: processing_queue_consumers == 0 and on (job_type) processing_queue_depth > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Queue {{ $labels.job_type }} has queued work but no worker consuming it"
+          description: "processing_queue_consumers is 0 for {{ $labels.job_type }} while jobs are outstanding — the worker for this queue is down. Jobs will sit at pending indefinitely with no error and no timeout."
+
+      # 6. Unusual spend rate on paid external APIs (Textract, OpenAI) — a
+      #    runaway regenerate loop or abuse pattern shows up here before it
+      #    shows up on a bill. cost_usd_total only increments in worker
+      #    processes, so it's pushed via Pushgateway (see metrics_push.py).
+      #    Threshold is $0.30/s sustained for 5m (~$90 in 5 minutes) — set
+      #    per explicit instruction; normal per-completed-application cost
+      #    is ~$0.28-0.30 TOTAL (see 02-architecture-overview.md §10's
+      #    real-usage-verified estimate), so this fires on a burn rate wildly
+      #    above one real user's normal usage, not on ordinary traffic.
+      - alert: CostSpikeSuspect
+        expr: sum(rate(cost_usd_total[5m])) > 0.30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusual spend rate on paid external APIs"
+          description: "cost_usd_total rising at ${{ $value }}/s — possible cost abuse or a runaway generation loop."
+
+  # jbs-solution-sheet.md O1: not an attack pattern like the group above —
+  # a content-safety signal. evidence_verification_total is emitted from
+  # generation_core.py's generate_and_verify_section (the anti-fabrication
+  # gate shared by tailored-CV and cover-letter generation), pushed via
+  # Pushgateway same as the worker-only counters above.
+  - name: quality
+    rules:
+      # A rising "omitted" share means either a prompt/model change broke
+      # grounding (sections are quietly missing from users' documents) or
+      # the model has started fabricating and the verification gate is
+      # catching it — both are the product silently failing, not a ticket.
+      - alert: FabricationRateSpike
+        expr: |
+          sum(rate(evidence_verification_total{outcome="omitted"}[15m]))
+            / sum(rate(evidence_verification_total[15m])) > 0.15
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Generated content is being rejected as unverifiable at an unusual rate"
+          description: >
+            Over 15% of generated sections failed evidence verification in
+            the last 15m. Either a prompt change has degraded grounding, or
+            the model has started fabricating. No infrastructure metric
+            will show this.

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CV Tailoring — Phase 1 Test Harness</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>CV Tailoring — Phase 1 Harness</h1>
+    <div id="user-bar" class="hidden">
+      <span id="user-email"></span>
+      <button id="btn-logout">Logout</button>
+    </div>
+  </header>
+
+  <!-- Auth section (visible when not logged in) -->
+  <section id="auth-section">
+    <div class="card">
+      <h2>Register</h2>
+      <form id="form-register">
+        <label>Email <input type="email" name="email" required></label>
+        <label>Password <input type="password" name="password" required minlength="8"></label>
+        <button type="submit">Register</button>
+      </form>
+      <pre id="register-result" class="result hidden"></pre>
+    </div>
+
+    <div class="card">
+      <h2>Login</h2>
+      <form id="form-login">
+        <label>Email <input type="email" name="email" required></label>
+        <label>Password <input type="password" name="password" required></label>
+        <button type="submit">Login</button>
+      </form>
+      <pre id="login-result" class="result hidden"></pre>
+    </div>
+  </section>
+
+  <!-- App section (visible when logged in) -->
+  <section id="app-section" class="hidden">
+    <nav class="tabs">
+      <button class="tab active" data-tab="upload">Upload CV</button>
+      <button class="tab" data-tab="cv-list">My CVs</button>
+      <button class="tab" data-tab="status">Job Status</button>
+      <button class="tab" data-tab="result">Extraction Result</button>
+      <button class="tab" data-tab="parsed">Parsed Profile</button>
+      <button class="tab" data-tab="job-posts">Job Posts</button>
+    </nav>
+
+    <!-- Upload tab -->
+    <div id="tab-upload" class="tab-content active">
+      <div class="card">
+        <h2>Upload CV</h2>
+        <form id="form-upload">
+          <label>Select CV file (PDF or DOCX)
+            <input type="file" name="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
+          </label>
+          <button type="submit">Upload</button>
+        </form>
+        <pre id="upload-result" class="result hidden"></pre>
+      </div>
+    </div>
+
+    <!-- CV List tab -->
+    <div id="tab-cv-list" class="tab-content">
+      <div class="card">
+        <h2>My Uploaded CVs</h2>
+        <button id="btn-refresh-cvs">Refresh</button>
+        <div id="cv-list-container">
+          <p>Loading...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status tab -->
+    <div id="tab-status" class="tab-content">
+      <div class="card">
+        <h2>Track Processing Job</h2>
+        <form id="form-status">
+          <label>Job ID <input type="text" name="jobId" placeholder="Paste processingJobId here" required></label>
+          <button type="submit">Track</button>
+          <label class="checkbox-label">
+            <input type="checkbox" id="auto-poll" checked> Auto-poll (every 2s)
+          </label>
+        </form>
+        <div id="status-display" class="hidden">
+          <h3>Status: <span id="status-value">—</span></h3>
+          <table id="status-detail">
+            <tr><th>Field</th><th>Value</th></tr>
+            <tr><td>Job Type</td><td id="s-job-type">—</td></tr>
+            <tr><td>Status</td><td id="s-status">—</td></tr>
+            <tr><td>Retry Count</td><td id="s-retries">—</td></tr>
+            <tr><td>Last Error</td><td id="s-error">—</td></tr>
+            <tr><td>Created</td><td id="s-created">—</td></tr>
+            <tr><td>Started</td><td id="s-started">—</td></tr>
+            <tr><td>Completed</td><td id="s-completed">—</td></tr>
+          </table>
+        </div>
+        <pre id="status-result" class="result hidden"></pre>
+      </div>
+    </div>
+
+    <!-- Extraction Result tab -->
+    <div id="tab-result" class="tab-content">
+      <div class="card">
+        <h2>Extraction Detail</h2>
+        <form id="form-result">
+          <label>CV ID <input type="text" name="cvId" placeholder="cvId from upload" required></label>
+          <button type="submit">Fetch</button>
+        </form>
+
+        <div id="extraction-output" class="hidden">
+          <h3>Canonical Text</h3>
+          <pre id="raw-text-display"></pre>
+
+          <h3>Extraction Detail (raw JSON)</h3>
+          <pre id="extraction-detail-display"></pre>
+        </div>
+        <pre id="result-result" class="result hidden"></pre>
+      </div>
+    </div>
+
+    <!-- Parsed Profile tab (Phase 2) -->
+    <div id="tab-parsed" class="tab-content">
+      <div class="card">
+        <h2>Structured Candidate Profile</h2>
+        <form id="form-parsed">
+          <label>CV ID <input type="text" name="cvId" placeholder="cvId from upload" required></label>
+          <button type="submit">Fetch Profile</button>
+        </form>
+        <pre id="parsed-result" class="result hidden"></pre>
+      </div>
+    </div>
+
+    <!-- Job Posts tab (Phase 2) -->
+    <div id="tab-job-posts" class="tab-content">
+      <div class="card">
+        <h2>Submit Job Post (URL)</h2>
+        <form id="form-job-url">
+          <label>Job Post URL <input type="url" name="url" placeholder="https://example.com/job/123" required></label>
+          <button type="submit">Submit URL</button>
+        </form>
+        <pre id="job-url-result" class="result hidden"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Submit Job Post (Pasted Text)</h2>
+        <form id="form-job-text">
+          <label>Job Description (min 100 chars)
+            <textarea name="text" rows="6" placeholder="Paste the full job description here..." required minlength="100"></textarea>
+          </label>
+          <button type="submit">Submit Text</button>
+        </form>
+        <pre id="job-text-result" class="result hidden"></pre>
+      </div>
+
+      <div class="card">
+        <h2>My Job Posts</h2>
+        <button id="btn-refresh-jobs">Refresh</button>
+        <div id="job-list-container">
+          <p>No job posts yet.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>API: <code id="api-url">http://localhost:8000/api/v1</code></p>
+    <p class="note">Developer test harness — not a product frontend. Per 13-frontend-plan.md.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans: var(--font-sans);
+  --font-heading: var(--font-heading);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@layer base {
+  /*
+   * shadcn/ui's own oklch palette ("radix-nova") is replaced with a
+   * pass-through onto Modernist's tokens (src/styles/modernist.css) so the
+   * remaining shadcn primitives (dialog, dropdown-menu, tabs, progress,
+   * skeleton, sonner, avatar) inherit the new look without each needing a
+   * bespoke rewrite — the 8 dashboard mockup screens and the marketing/
+   * auth/try pages are ported to Modernist's own classes directly (see
+   * src/components/modernist/*), this mapping covers everything else.
+   * There is no dark variant in Modernist (a light, near-mono system by
+   * design) and no theme toggle wired up in this app, so .dark intentionally
+   * mirrors :root rather than diverging.
+   */
+  :root {
+    /* NB: the shadcn scaffold originally gated these two behind an unused
+       `.theme` class (never applied to any element) — moved onto :root
+       directly so `font-sans`/`font-heading` utilities actually resolve. */
+    --font-heading: var(--font-archivo), system-ui, sans-serif;
+    --font-sans: var(--font-archivo), system-ui, sans-serif;
+    --background: var(--color-bg);
+    --foreground: var(--color-text);
+    --card: var(--color-surface);
+    --card-foreground: var(--color-text);
+    --popover: var(--color-surface);
+    --popover-foreground: var(--color-text);
+    --primary: var(--color-accent);
+    --primary-foreground: var(--color-bg);
+    --secondary: var(--color-surface);
+    --secondary-foreground: var(--color-text);
+    --muted: var(--color-neutral-200);
+    --muted-foreground: color-mix(in srgb, var(--color-text) 55%, transparent);
+    --accent: var(--color-neutral-200);
+    --accent-foreground: var(--color-text);
+    --destructive: var(--color-accent-700);
+    --border: var(--color-divider);
+    --input: var(--color-divider);
+    --ring: var(--color-accent);
+    --chart-1: var(--color-accent-500);
+    --chart-2: var(--color-neutral-600);
+    --chart-3: var(--color-neutral-500);
+    --chart-4: var(--color-neutral-400);
+    --chart-5: var(--color-neutral-300);
+    --radius: 0px;
+    --sidebar: var(--color-bg);
+    --sidebar-foreground: var(--color-text);
+    --sidebar-primary: var(--color-text);
+    --sidebar-primary-foreground: var(--color-bg);
+    --sidebar-accent: var(--color-neutral-200);
+    --sidebar-accent-foreground: var(--color-text);
+    --sidebar-border: var(--color-divider);
+    --sidebar-ring: var(--color-accent);
+  }
+  .dark {
+    --background: var(--color-bg);
+    --foreground: var(--color-text);
+    --card: var(--color-surface);
+    --card-foreground: var(--color-text);
+    --popover: var(--color-surface);
+    --popover-foreground: var(--color-text);
+    --primary: var(--color-accent);
+    --primary-foreground: var(--color-bg);
+    --secondary: var(--color-surface);
+    --secondary-foreground: var(--color-text);
+    --muted: var(--color-neutral-200);
+    --muted-foreground: color-mix(in srgb, var(--color-text) 55%, transparent);
+    --accent: var(--color-neutral-200);
+    --accent-foreground: var(--color-text);
+    --destructive: var(--color-accent-700);
+    --border: var(--color-divider);
+    --input: var(--color-divider);
+    --ring: var(--color-accent);
+    --chart-1: var(--color-accent-500);
+    --chart-2: var(--color-neutral-600);
+    --chart-3: var(--color-neutral-500);
+    --chart-4: var(--color-neutral-400);
+    --chart-5: var(--color-neutral-300);
+    --sidebar: var(--color-bg);
+    --sidebar-foreground: var(--color-text);
+    --sidebar-primary: var(--color-text);
+    --sidebar-primary-foreground: var(--color-bg);
+    --sidebar-accent: var(--color-neutral-200);
+    --sidebar-accent-foreground: var(--color-text);
+    --sidebar-border: var(--color-divider);
+    --sidebar-ring: var(--color-accent);
+  }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}

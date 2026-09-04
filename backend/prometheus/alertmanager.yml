@@ -1,0 +1,16 @@
+# Alertmanager config — minimal stub receiver.
+#
+# No real Slack/email/PagerDuty channel is configured yet (that's a separate
+# on-call-tooling decision, not this sprint's). Alerts still fire and are
+# queryable at the Alertmanager API (/api/v2/alerts) and UI, which is what
+# Workstream H's live-fire verification checks — delivery routing is the one
+# loose end flagged in the Sprint 6 sign-off.
+
+route:
+  receiver: "stub"
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: "stub"

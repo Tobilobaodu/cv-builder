@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["external:@opentelemetry/api"],
+  "sourcesContent": ["export * from \"@opentelemetry/api\""],
+  "mappings": ";;;;;;i7BAAA,IAAAA,EAAA,aAAAC,MAAc,qBAAd,IAAAC,EAAAC,EAAA,KAAAC,EAAAJ,EAAAC",
+  "names": ["api_exports", "api_star", "init_api", "__esmMin", "__reExport"]
+}

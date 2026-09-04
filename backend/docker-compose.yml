@@ -1,0 +1,682 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    # Also on no_internet so the synchronous PDF export can reach the
+    # gotenberg container, which is no_internet-ONLY by design (it renders
+    # untrusted CV content and must not have egress). Multi-homing the API
+    # grants gotenberg nothing — the API already has egress via `default`
+    # for the LLM provider.
+    networks:
+      - default
+      - no_internet
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      clamav:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+
+  # PostgreSQL 15+ with health check per spec
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cvapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cvapp_local}
+      POSTGRES_DB: ${POSTGRES_DB:-cv_tailoring}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Only runs on a fresh volume — creates cv_tailoring_test alongside the
+      # main dev DB, so host-venv pytest runs never pollute the shared dev
+      # database. Already-running dev environments need this created once
+      # manually (`CREATE DATABASE cv_tailoring_test OWNER cvapp;`) since
+      # init scripts don't re-run against an existing volume.
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cvapp} -d ${POSTGRES_DB:-cv_tailoring}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    # Also on no_internet so the deny-egress workers (worker_cv_parse,
+    # worker_docling, worker_ats_check — no_internet-ONLY, no `default`)
+    # can still reach it. no_internet is `internal: true`, so this does
+    # not grant postgres itself any outbound route.
+    networks:
+      - default
+      - no_internet
+
+  # ──────────────────────────────────────────────────────────────────
+  # Read-replica — a plan/reviewable shape, not an active service. See
+  # the DR/read-replica deferred-item note: this is the self-managed-
+  # Postgres path's equivalent of "provision a read replica," left
+  # commented rather than live because nothing today has a read-heavy
+  # workload to justify running it, and because streaming replication
+  # needs a real primary reachable at a stable network identity — fine
+  # in this same compose file, not yet proven against a real deployed
+  # topology. Cutting actual read traffic to it is an app-level routing
+  # decision (a second SQLAlchemy engine, read-only endpoints choosing
+  # it) deliberately not made here — this only stands the replica up.
+  # Uncommenting this block alone is not enough to activate it — three
+  # things still need doing first, deliberately not done here since they
+  # touch the live primary and aren't needed while this stays inactive:
+  #   1. Primary needs `wal_level=replica` (+ max_wal_senders,
+  #      max_replication_slots) — a `command:` override on `postgres`
+  #      above, e.g. `command: postgres -c wal_level=replica -c max_wal_senders=3`.
+  #   2. A `replicator` role with REPLICATION privilege must exist on
+  #      the primary (a migration, or postgres-init/ script — not the
+  #      app_runtime role from migration 017, a separate one).
+  #   3. `postgres_replica_data` needs declaring in this file's
+  #      top-level `volumes:` section.
+  # ──────────────────────────────────────────────────────────────────
+  #  postgres_replica:
+  #    image: postgres:16-alpine
+  #    environment:
+  #      POSTGRES_USER: ${POSTGRES_USER:-cvapp}
+  #      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cvapp_local}
+  #      PGPASSWORD: ${POSTGRES_REPLICATION_PASSWORD:-replicator_local}
+  #    ports:
+  #      - "5433:5432"
+  #    volumes:
+  #      - postgres_replica_data:/var/lib/postgresql/data
+  #    # No local init — this entrypoint clones the primary via
+  #    # pg_basebackup on first start (empty data dir), then starts as a
+  #    # hot standby streaming from it. depends_on healthy so the base
+  #    # backup doesn't race the primary's own startup.
+  #    entrypoint: >
+  #      bash -c "
+  #      if [ -z \"$(ls -A /var/lib/postgresql/data)\" ]; then
+  #        pg_basebackup -h postgres -U replicator -D /var/lib/postgresql/data -Fp -Xs -P -R;
+  #      fi;
+  #      docker-entrypoint.sh postgres"
+  #    depends_on:
+  #      postgres:
+  #        condition: service_healthy
+  #    restart: unless-stopped
+  #    networks:
+  #      - default
+  #      - no_internet
+
+  # Redis for Celery broker and cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - default
+      - no_internet
+
+  # MinIO for S3-compatible local object storage
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    # worker_docling (no_internet-only) reads uploaded files from here.
+    networks:
+      - default
+      - no_internet
+
+  # ClamAV for malware scanning
+  clamav:
+    image: clamav/clamav:latest
+    ports:
+      - "3310:3310"
+    environment:
+      CLAMAV_NO_FRESHCLAMD: "false"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    # Also on no_internet: the malware scan moved from the API request path
+    # into worker_text_extract (jbs-solution-sheet.md S6), which is
+    # no_internet-ONLY by design. Multi-homing clamav grants that worker
+    # nothing new — clamav still needs `default` itself, for freshclam's
+    # virus-database updates.
+    networks:
+      - default
+      - no_internet
+
+  # ──────────────────────────────────────────────────────────────────
+  # DECOMMISSIONED — pipeline steps 3-6 (Docling / Textract / merge /
+  # cv_parse). Replaced by the `extraction` service below, which hosts
+  # Example's routes/extract.ts unchanged. Task code moved verbatim to
+  # decommissioned/. Left commented rather than deleted
+  # so the old pipeline can be restored by uncommenting this block and
+  # restoring the modules it imports.
+  # ──────────────────────────────────────────────────────────────────
+#  # Celery worker - Docling extraction
+#  worker_docling:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    command: celery -A app.workers.tasks worker -Q docling_extract --concurrency=2 --loglevel=info
+#    env_file:
+#      - .env.local
+#    depends_on:
+#      postgres:
+#        condition: service_healthy
+#      redis:
+#        condition: service_started
+#      minio:
+#        condition: service_started
+#    volumes:
+#      - ./app:/app/app:ro
+#    restart: unless-stopped
+#    # Docling worker: no_internet ONLY, not also `default` — being
+#    # multi-homed on both would let traffic still route out via
+#    # `default`'s gateway regardless of no_internet's `internal: true`,
+#    # silently defeating the whole point (confirmed live: this was
+#    # exactly the bug before this network config was corrected).
+#    networks:
+#      - no_internet
+
+#  # Celery worker - Textract enrichment
+#  worker_textract:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    command: celery -A app.workers.tasks worker -Q textract_extract --concurrency=2 --loglevel=info
+#    env_file:
+#      - .env.local
+#    depends_on:
+#      postgres:
+#        condition: service_healthy
+#      redis:
+#        condition: service_started
+#    volumes:
+#      - ./app:/app/app:ro
+#    restart: unless-stopped
+#    # Textract worker: needs outbound to AWS Textract endpoint only
+#    networks:
+#      - default
+
+#  # Celery worker - merge and structural validation
+#  worker_merge:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    command: celery -A app.workers.tasks worker -Q merge_parse --concurrency=2 --loglevel=info
+#    env_file:
+#      - .env.local
+#    depends_on:
+#      postgres:
+#        condition: service_healthy
+#      redis:
+#        condition: service_started
+#    volumes:
+#      - ./app:/app/app:ro
+#    restart: unless-stopped
+
+#  # Celery worker - job post URL fetch (SSRF-safe, network-isolated)
+
+  # Extraction service — Example's step 2, copied unchanged.
+  # Node rather than Python because extract.ts is used verbatim (the ask was
+  # to copy the code, not reimplement it). Needs poppler-utils + unzip, which
+  # its Dockerfile installs; extract.ts shells out to both.
+  extraction:
+    build:
+      context: ./extraction-service
+      dockerfile: Dockerfile
+    environment:
+      PORT: "5050"
+      NODE_ENV: production
+    restart: unless-stopped
+    # No DB, no broker, no object storage: it takes bytes in and returns text.
+    # On no_internet only — it never needs egress, matching the isolation the
+    # decommissioned Docling worker had.
+    networks:
+      - no_internet
+
+  worker_job_fetch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q job_post_fetch --concurrency=3 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    # Per 10-security-plan.md §4: network-level egress restriction as the
+    # backstop if application-level IP validation has a bypass. This worker
+    # needs internal DB/Redis + public internet only — no route to cloud
+    # metadata or other internal-only services.
+    networks:
+      - default
+
+  # Celery worker - job post structuring (rules-based, no LLM needed yet)
+  worker_job_parse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q job_post_parse --concurrency=3 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+
+  # Celery worker - match analysis (Phase 3)
+  worker_match:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q match --concurrency=3 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+
+  # Celery worker - CV structured profile extraction (Phase 2)
+  # DECOMMISSIONED — step 6 (cv_parse). Moved to
+  # decommissioned/step6_cv_parse_task.py.
+#  worker_cv_parse:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    command: celery -A app.workers.tasks worker -Q cv_parse --concurrency=2 --loglevel=info
+#    env_file:
+#      - .env.local
+#    depends_on:
+#      postgres:
+#        condition: service_healthy
+#      redis:
+#        condition: service_started
+#    volumes:
+#      - ./app:/app/app:ro
+#    restart: unless-stopped
+#    # CV parse worker: reads from cv_raw_text, writes to profile tables.
+#    # no_internet ONLY — see worker_docling's comment for why not also
+#    # `default`.
+#    networks:
+#      - no_internet
+
+#  # Celery worker - tailored CV generation (Sprint 3)
+
+  # Celery worker - text extraction (replaces steps 3-6)
+  worker_text_extract:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q text_extract --concurrency=2 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      extraction:
+        condition: service_started
+      clamav:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    # no_internet only: reaches postgres, redis, minio, the extraction
+    # service, and clamav (also multi-homed onto no_internet — see its own
+    # service definition), all reachable on that network. Same posture the
+    # decommissioned Docling worker had. The malware scan runs here now
+    # (jbs-solution-sheet.md S6), not in the api process.
+    networks:
+      - no_internet
+
+  worker_cv_generate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q cv_generate --concurrency=4 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    # Calls the OpenAI API — needs outbound internet, unlike the other
+    # CV-processing workers, which is exactly why it's not on the
+    # no_internet network like worker_cv_parse/worker_docling.
+    networks:
+      - default
+
+  # Celery worker - cover letter generation (Sprint 4)
+  worker_cover_letter_generate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q cover_letter_generate --concurrency=2 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    # Calls the OpenAI API — needs outbound internet, same reasoning as
+    # worker_cv_generate above.
+    networks:
+      - default
+
+  # Celery worker - ATS structural-readiness check (Product Extension #1)
+  worker_ats_check:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q ats_check --concurrency=2 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    # Rules-based check over already-extracted text/profile data already in
+    # the DB — no external input, no outbound network need. no_internet
+    # ONLY — see worker_docling's comment for why not also `default`.
+    networks:
+      - no_internet
+
+  # Celery worker - LLM-based CV analysis. Replaces the decommissioned
+  # structured-parsing pipeline's role as the source of a per-CV quality
+  # signal, and (via its FK-satisfying shim) the source of the
+  # CvProfileVersion/CvProfile row MatchRun/CoverLetterWorkflow require —
+  # see app/services/cv_analysis.py and worker_jobs.py::process_cv_analyze.
+  # Auto-chained from worker_text_extract on every successful extraction.
+  worker_cv_analyze:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q cv_analyze --concurrency=2 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    # Calls the OpenAI API — needs outbound internet, same reasoning as
+    # worker_cv_generate/worker_cover_letter_generate above.
+    networks:
+      - default
+
+  # Gotenberg — self-hosted, open-source LibreOffice-backed HTTP
+  # document-conversion service (Sprint 5). Used only for docx→pdf
+  # conversion, called by worker_export over the internal Docker network.
+  # No ports exposed to the host, no outbound internet need — local
+  # document processing only, same isolation posture as the CV-parsing
+  # workers.
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    networks:
+      - no_internet
+
+  # Celery worker - document exports (Sprint 5). Handles both the
+  # `export` queue (docx/zip rendering, docxtpl — pure local processing)
+  # and the `export_pdf` queue (docx→pdf conversion via the gotenberg
+  # container above) — two closely-coupled stages of one feature sharing
+  # one worker, rather than a fourth service; see the Sprint 5 plan for
+  # the reasoning and the revisit condition (real queue contention).
+  worker_export:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q export,export_pdf --concurrency=2 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      gotenberg:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    # docx rendering is local (docxtpl); pdf conversion calls gotenberg
+    # over this same internal network, not the public internet — no
+    # outbound need at all, so this stays no_internet-only.
+    networks:
+      - no_internet
+
+  # Celery worker - multi-job-post coverage reporting (Sprint 5 /
+  # Product Extension #2). Kept as its own service rather than folded
+  # into worker_export: a structurally different workload (potentially
+  # many sequential match_engine.run_match() calls, not a single render)
+  # with no shared data path — the queue-per-worker convention keeps the
+  # queue-to-worker mapping obvious, avoiding the "queue with no
+  # consuming worker" class of bug this project has already paid for
+  # more than once (see worker_ats_check's own review history).
+  worker_coverage_report:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q coverage_report --concurrency=2 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    # _get_or_run_match (worker_jobs.py) calls the LLM-based match
+    # analysis (match_analysis.py::run_match_llm) whenever a job post in
+    # the collection has no existing completed MatchRun yet — the same
+    # OpenAI call worker_match makes. This was no_internet-only under the
+    # old rules-based match_engine.run_match(); it was never updated when
+    # matching moved to the LLM, so every coverage report on a job
+    # without a pre-existing match silently failed after 3 retries
+    # ("Connection error"). Needs the same network posture as
+    # worker_match/worker_cv_analyze now.
+    networks:
+      - default
+
+  # Celery worker - maintenance tasks (trial-session expiry cleanup)
+  worker_maintenance:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q maintenance --concurrency=1 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    # Only ever touches the DB via internal deletes on expired rows —
+    # no external input, no outbound network need. Deny-all egress.
+    networks:
+      - default
+      - no_internet
+
+  # Celery worker — free-API job feed refresh (item 7). Needs public
+  # internet egress to reach RemoteOK/Remotive/Arbeitnow/Reed/USAJobs, so
+  # (like worker_job_fetch, unlike worker_maintenance) it stays off
+  # no_internet.
+  worker_job_feed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks worker -Q job_feed --concurrency=1 --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+    networks:
+      - default
+
+  # Celery beat — schedules periodic tasks (see beat_schedule in
+  # app/workers/tasks.py). A pure scheduler process: publishes task
+  # messages to Redis on schedule, does not execute them itself — the
+  # relevant queue still needs a worker consuming it (e.g. worker_maintenance
+  # for the maintenance queue).
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.workers.tasks beat --loglevel=info
+    env_file:
+      - .env.local
+    depends_on:
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+
+  # Pushgateway — Sprint 6 live-fire finding: Prometheus only scrapes the
+  # api service, so counters that only ever increment inside Celery worker
+  # processes (SSRF rejections, generation schema-validation failures, real
+  # API spend) were provably never reaching it. Workers push those specific
+  # counters here (app/core/metrics_push.py); Prometheus scrapes this
+  # gateway as a second target. Deliberately not used for JOB_THROUGHPUT or
+  # other per-worker counters that aren't part of the §10 alert set.
+  pushgateway:
+    image: prom/pushgateway:latest
+    ports:
+      - "9091:9091"
+    restart: unless-stopped
+
+  # Prometheus — scrapes /metrics from the API and the Pushgateway
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    depends_on:
+      - api
+      - alertmanager
+      - pushgateway
+    restart: unless-stopped
+
+  # Alertmanager — receives Prometheus alerts from alert_rules.yml and routes
+  # them. Receiver is a log-only stub for now (no Slack/email/PagerDuty channel
+  # exists yet — that's a separate on-call-tooling decision, not this sprint's;
+  # flagged as the one loose end in the Sprint 6 sign-off).
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports:
+      - "9093:9093"
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    restart: unless-stopped
+
+  # Grafana — dashboards for Prometheus metrics
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  clamav_data:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+
+networks:
+  default:
+  no_internet:
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"

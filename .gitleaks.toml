@@ -1,0 +1,21 @@
+title = "gitleaks config for JBS"
+
+[extend]
+useDefault = true
+
+# .claude/settings.json is Claude Code's own tool-permission allowlist: it
+# stores previously-approved Bash command patterns verbatim, e.g.
+# `curl ... -H 'Authorization: Bearer __TRACKED_VAR__'`. The
+# __TRACKED_VAR__/__CMDSUB_OUTPUT__ placeholders are Claude Code's own
+# redaction markers for a shell variable, never a real credential value —
+# but gitleaks' generic curl-auth-header rule matches on the literal string
+# "Authorization: Bearer" regardless of what follows it, so every commit
+# touching this file trips it. Confirmed via a local full-history scan
+# (`docker run zricethezav/gitleaks detect`, 49 commits) that this is the
+# only source of findings in the whole repo — allowlisted by path rather
+# than by fingerprint, since per-commit fingerprints proved unstable to
+# pin down exactly across repeated scans of the same history.
+[allowlist]
+paths = [
+  '''\.claude/settings\.json''',
+]

@@ -1,0 +1,43 @@
+# Test CVs (contain real personal data)
+Test Cvs/
+
+# Implementation documentation — local only. The authoritative spec docs,
+# but the newer research docs (16, 17) capture live reproduction runs
+# against real CVs and job posts, including personal data, and the pack
+# otherwise churns with every working session. Was previously tracked, so
+# this rule alone doesn't untrack it; `git rm -r --cached "Implementation
+# pack"` removed it from the index, keeping the files on disk.
+Implementation pack/
+
+# Temp files
+temp_metrics.txt
+
+# Raw ESCO source export (~760MB) — one-time input to
+# backend/scripts/ingest_esco.py, not a repo artifact. The generated
+# output (backend/app/data/skills_index.json, ~5MB) is what's committed.
+ESCO dataset*/
+ESCO dataset*.zip
+
+# Reference implementation checked out for side-by-side comparison, not a
+# part of this project. It carries its own .git, .replit and node_modules,
+# so committing it would nest a foreign repo inside this one. The parts we
+# actually adopted were copied to backend/extraction-service/ (tracked) and
+# are documented in backend/decommissioned/README.md.
+Example/
+
+# Old extraction pipeline (Docling/Textract/merge/cv_parse), kept verbatim
+# on disk for local read/diff/restore per its own README, but not something
+# a fresh clone or collaborator needs — was previously tracked, so this
+# alone won't stop git from seeing it; see backend/decommissioned/README.md.
+backend/decommissioned/
+
+# Diagnostic scratchpad from the Example-vs-JBS comparison. The raw JSON
+# both systems returned for one CV/JD pair is evidence for a decision, not
+# code the app runs. The three analysis docs alongside it were already
+# committed and stay committed, so this ignores entries individually and
+# re-includes them by name — a bare `CV matching fix/` would exclude the
+# directory, and git cannot re-include a file whose parent dir is excluded.
+CV matching fix/*
+!CV matching fix/bug-report.md
+!CV matching fix/cv-diagnosis.md
+!CV matching fix/essay-diagnostic-methodology.md

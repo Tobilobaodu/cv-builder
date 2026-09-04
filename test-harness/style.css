@@ -1,0 +1,231 @@
+/* CV Tailoring — Phase 1 Test Harness
+ * Minimal unstyled layout per 13-frontend-plan.md §2.
+ * No component library, no responsive design, no design system. */
+
+:root {
+  --bg: #f9fafb;
+  --card: #fff;
+  --text: #111827;
+  --muted: #6b7280;
+  --border: #d1d5db;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --danger: #ef4444;
+  --success: #22c55e;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0 1rem 2rem;
+  background: var(--bg);
+  color: var(--text);
+  max-width: 900px;
+  margin-inline: auto;
+  line-height: 1.5;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+}
+
+header h1 { font-size: 1.25rem; margin: 0; }
+
+#user-bar { display: flex; align-items: center; gap: 1rem; }
+#user-bar span { color: var(--muted); font-size: 0.875rem; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.card h2 {
+  font-size: 1rem;
+  margin: 0 0 1rem 0;
+}
+
+form { display: flex; flex-direction: column; gap: 0.75rem; }
+
+label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.875rem;
+  font-weight: 500;
+  gap: 0.25rem;
+}
+
+input[type="email"],
+input[type="password"],
+input[type="text"],
+input[type="file"] {
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+button, .btn {
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  width: fit-content;
+}
+
+button:hover { background: var(--accent-hover); }
+
+button.danger { background: var(--danger); }
+
+.note { font-size: 0.75rem; color: var(--muted); }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  padding: 0.5rem 1rem;
+  background: none;
+  color: var(--muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Results */
+.result {
+  background: #f3f4f6;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.75rem;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow: auto;
+  margin-top: 0.75rem;
+}
+
+.result.error { border-color: var(--danger); color: var(--danger); }
+.result.success { border-color: var(--success); }
+
+/* Status table */
+#status-display table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+}
+
+#status-display th,
+#status-display td {
+  text-align: left;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+#status-display th {
+  width: 120px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+#status-value {
+  font-weight: 600;
+  font-size: 1.125rem;
+}
+
+#status-value.completed { color: var(--success); }
+#status-value.failed { color: var(--danger); }
+#status-value.processing { color: #f59e0b; }
+
+/* Extraction output */
+#raw-text-display {
+  max-height: 400px;
+  overflow: auto;
+  background: #f3f4f6;
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  border: 1px solid var(--border);
+}
+
+#extraction-detail-display {
+  max-height: 300px;
+  overflow: auto;
+  background: #f3f4f6;
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-size: 0.6875rem;
+  white-space: pre-wrap;
+  border: 1px solid var(--border);
+}
+
+/* CV list */
+.cv-item {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.875rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cv-item:last-child { border-bottom: none; }
+
+.status-badge {
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-badge.completed { background: #dcfce7; color: #166534; }
+.status-badge.processing,
+.status-badge.extracting,
+.status-badge.merging,
+.status-badge.pending { background: #fef3c7; color: #92400e; }
+.status-badge.failed { background: #fee2e2; color: #991b1b; }
+
+.hidden { display: none !important; }
+
+footer {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+}

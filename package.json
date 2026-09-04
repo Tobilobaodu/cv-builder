@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@vercel/otel": "^2.1.3"
+  }
+}

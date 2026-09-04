@@ -1,0 +1,82 @@
+{
+  "dashboard": {
+    "title": "Extraction Pipeline — Sprint 4 Metrics",
+    "description": "Job throughput, failure rate, processing duration per job type. Per 07-first-sprint-tasks.md Sprint 4.",
+    "tags": ["sprint-4", "extraction"],
+    "panels": [
+      {
+        "title": "Job Throughput — by type & status",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(processing_jobs_total[5m])",
+            "legendFormat": "{{job_type}} / {{status}}"
+          }
+        ],
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
+      },
+      {
+        "title": "Failure Rate — % of jobs failing per type",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(processing_jobs_total{status=\"failed\"}[5m]) / rate(processing_jobs_total[5m]) * 100",
+            "legendFormat": "{{job_type}} failure %"
+          }
+        ],
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+      },
+      {
+        "title": "Processing Duration — p50/p95 per job type (seconds)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(processing_job_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{job_type}} p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(processing_job_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{job_type}} p95"
+          }
+        ],
+        "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
+      },
+      {
+        "title": "Extraction Characters — by pass type",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(extraction_characters_sum[5m]) / rate(extraction_characters_count[5m])",
+            "legendFormat": "{{pass_type}} avg chars"
+          }
+        ],
+        "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
+      },
+      {
+        "title": "Merge Strategy Distribution",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "merge_strategy_used_total",
+            "legendFormat": "{{strategy}}"
+          }
+        ],
+        "gridPos": { "x": 0, "y": 16, "w": 8, "h": 6 }
+      },
+      {
+        "title": "Structural Anomalies Detected",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "increase(structural_anomalies_total{anomaly_detected=\"True\"}[1h])",
+            "legendFormat": "anomalies (1h)"
+          }
+        ],
+        "gridPos": { "x": 8, "y": 16, "w": 8, "h": 6 }
+      }
+    ],
+    "schemaVersion": 27,
+    "time": { "from": "now-1h", "to": "now" },
+    "refresh": "10s"
+  }
+}
