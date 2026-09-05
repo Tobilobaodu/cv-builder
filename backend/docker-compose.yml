@@ -24,8 +24,10 @@ services:
         condition: service_started
       clamav:
         condition: service_healthy
-    volumes:
-      - ./app:/app/app:ro
+    # No ./app bind mount: the Dockerfile copies the source into the image at
+    # build time. Mounting over /app/app was a local hot-reload convenience;
+    # on a deployed host it shadows the baked-in code with an empty directory
+    # and every service fails to import app.main.
     restart: unless-stopped
 
   # PostgreSQL 15+ with health check per spec
@@ -193,8 +195,6 @@ services:
 #        condition: service_started
 #      minio:
 #        condition: service_started
-#    volumes:
-#      - ./app:/app/app:ro
 #    restart: unless-stopped
 #    # Docling worker: no_internet ONLY, not also `default` — being
 #    # multi-homed on both would let traffic still route out via
@@ -217,8 +217,6 @@ services:
 #        condition: service_healthy
 #      redis:
 #        condition: service_started
-#    volumes:
-#      - ./app:/app/app:ro
 #    restart: unless-stopped
 #    # Textract worker: needs outbound to AWS Textract endpoint only
 #    networks:
@@ -237,8 +235,6 @@ services:
 #        condition: service_healthy
 #      redis:
 #        condition: service_started
-#    volumes:
-#      - ./app:/app/app:ro
 #    restart: unless-stopped
 
 #  # Celery worker - job post URL fetch (SSRF-safe, network-isolated)
@@ -273,8 +269,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     # Per 10-security-plan.md §4: network-level egress restriction as the
     # backstop if application-level IP validation has a bypass. This worker
@@ -296,8 +290,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
 
   # Celery worker - match analysis (Phase 3)
@@ -313,8 +305,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
 
   # Celery worker - CV structured profile extraction (Phase 2)
@@ -332,8 +322,6 @@ services:
 #        condition: service_healthy
 #      redis:
 #        condition: service_started
-#    volumes:
-#      - ./app:/app/app:ro
 #    restart: unless-stopped
 #    # CV parse worker: reads from cv_raw_text, writes to profile tables.
 #    # no_internet ONLY — see worker_docling's comment for why not also
@@ -362,8 +350,6 @@ services:
         condition: service_started
       clamav:
         condition: service_healthy
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     # no_internet only: reaches postgres, redis, minio, the extraction
     # service, and clamav (also multi-homed onto no_internet — see its own
@@ -385,8 +371,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     # Calls the OpenAI API — needs outbound internet, unlike the other
     # CV-processing workers, which is exactly why it's not on the
@@ -407,8 +391,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     # Calls the OpenAI API — needs outbound internet, same reasoning as
     # worker_cv_generate above.
@@ -428,8 +410,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     # Rules-based check over already-extracted text/profile data already in
     # the DB — no external input, no outbound network need. no_internet
@@ -455,8 +435,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     # Calls the OpenAI API — needs outbound internet, same reasoning as
     # worker_cv_generate/worker_cover_letter_generate above.
@@ -495,8 +473,6 @@ services:
         condition: service_started
       gotenberg:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     # docx rendering is local (docxtpl); pdf conversion calls gotenberg
     # over this same internal network, not the public internet — no
@@ -524,8 +500,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     # _get_or_run_match (worker_jobs.py) calls the LLM-based match
     # analysis (match_analysis.py::run_match_llm) whenever a job post in
@@ -552,8 +526,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     # Only ever touches the DB via internal deletes on expired rows —
     # no external input, no outbound network need. Deny-all egress, so
@@ -581,8 +553,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
     networks:
       - default
@@ -602,8 +572,6 @@ services:
     depends_on:
       redis:
         condition: service_started
-    volumes:
-      - ./app:/app/app:ro
     restart: unless-stopped
 
   # Pushgateway — Sprint 6 live-fire finding: Prometheus only scrapes the
