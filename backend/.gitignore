@@ -33,6 +33,14 @@ htmlcov/
 # Docker
 .docker/
 
+# Local-only compose overrides. docker-compose.override.yml restores the
+# ./app bind mounts for host hot-reloading; those mounts must never reach a
+# deployed host, where they shadow the image's baked-in code with an empty
+# directory and every service dies importing app.main. Compose merges this
+# file automatically on a bare `docker compose up`, so keeping it untracked
+# is what guarantees a deploy checkout can't pick it up.
+docker-compose.override.yml
+
 # OS
 .DS_Store
 Thumbs.db

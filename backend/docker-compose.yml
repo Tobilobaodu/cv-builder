@@ -1,5 +1,6 @@
 services:
   api:
+    mem_limit: 768m
     build:
       context: .
       dockerfile: Dockerfile
@@ -34,6 +35,7 @@ services:
   # No published port: reachable as postgres:5432 over the compose network.
   # Publishing to the host clashed with Temps' own TimescaleDB on 5432.
   postgres:
+    mem_limit: 1g
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cvapp}
@@ -116,6 +118,7 @@ services:
   # No published port: reachable as redis:6379 over the compose network.
   # Publishing to the host clashed with the Temps-managed Redis service.
   redis:
+    mem_limit: 512m
     image: redis:7-alpine
     volumes:
       - redis_data:/data
@@ -126,6 +129,7 @@ services:
 
   # MinIO for S3-compatible local object storage
   minio:
+    mem_limit: 512m
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
@@ -151,6 +155,7 @@ services:
   # No published port: worker_text_extract reaches clamd at clamav:3310
   # over the compose network. Nothing on the host needs it.
   clamav:
+    mem_limit: 2g
     image: clamav/clamav:latest
     environment:
       CLAMAV_NO_FRESHCLAMD: "false"
@@ -244,6 +249,7 @@ services:
   # to copy the code, not reimplement it). Needs poppler-utils + unzip, which
   # its Dockerfile installs; extract.ts shells out to both.
   extraction:
+    mem_limit: 512m
     build:
       context: ./extraction-service
       dockerfile: Dockerfile
@@ -258,6 +264,7 @@ services:
       - no_internet
 
   worker_job_fetch:
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -279,6 +286,7 @@ services:
 
   # Celery worker - job post structuring (rules-based, no LLM needed yet)
   worker_job_parse:
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -294,6 +302,7 @@ services:
 
   # Celery worker - match analysis (Phase 3)
   worker_match:
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -333,6 +342,7 @@ services:
 
   # Celery worker - text extraction (replaces steps 3-6)
   worker_text_extract:
+    mem_limit: 768m
     build:
       context: .
       dockerfile: Dockerfile
@@ -360,6 +370,7 @@ services:
       - no_internet
 
   worker_cv_generate:
+    mem_limit: 768m
     build:
       context: .
       dockerfile: Dockerfile
@@ -380,6 +391,7 @@ services:
 
   # Celery worker - cover letter generation (Sprint 4)
   worker_cover_letter_generate:
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -399,6 +411,7 @@ services:
 
   # Celery worker - ATS structural-readiness check (Product Extension #1)
   worker_ats_check:
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -424,6 +437,7 @@ services:
   # see app/services/cv_analysis.py and worker_jobs.py::process_cv_analyze.
   # Auto-chained from worker_text_extract on every successful extraction.
   worker_cv_analyze:
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -448,6 +462,7 @@ services:
   # document processing only, same isolation posture as the CV-parsing
   # workers.
   gotenberg:
+    mem_limit: 1g
     image: gotenberg/gotenberg:8
     restart: unless-stopped
     networks:
@@ -460,6 +475,7 @@ services:
   # one worker, rather than a fourth service; see the Sprint 5 plan for
   # the reasoning and the revisit condition (real queue contention).
   worker_export:
+    mem_limit: 768m
     build:
       context: .
       dockerfile: Dockerfile
@@ -489,6 +505,7 @@ services:
   # consuming worker" class of bug this project has already paid for
   # more than once (see worker_ats_check's own review history).
   worker_coverage_report:
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -515,6 +532,7 @@ services:
 
   # Celery worker - maintenance tasks (trial-session expiry cleanup)
   worker_maintenance:
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -542,6 +560,7 @@ services:
   # (like worker_job_fetch, unlike worker_maintenance) it stays off
   # no_internet.
   worker_job_feed:
+    mem_limit: 512m
     build:
       context: .
       dockerfile: Dockerfile
@@ -563,6 +582,7 @@ services:
   # relevant queue still needs a worker consuming it (e.g. worker_maintenance
   # for the maintenance queue).
   beat:
+    mem_limit: 256m
     build:
       context: .
       dockerfile: Dockerfile
@@ -582,6 +602,7 @@ services:
   # gateway as a second target. Deliberately not used for JOB_THROUGHPUT or
   # other per-worker counters that aren't part of the §10 alert set.
   pushgateway:
+    mem_limit: 256m
     image: prom/pushgateway:latest
     ports:
       - "9091:9091"
@@ -589,6 +610,7 @@ services:
 
   # Prometheus — scrapes /metrics from the API and the Pushgateway
   prometheus:
+    mem_limit: 1g
     image: prom/prometheus:latest
     ports:
       - "9090:9090"
@@ -610,6 +632,7 @@ services:
   # exists yet — that's a separate on-call-tooling decision, not this sprint's;
   # flagged as the one loose end in the Sprint 6 sign-off).
   alertmanager:
+    mem_limit: 256m
     image: prom/alertmanager:latest
     ports:
       - "9093:9093"
@@ -622,6 +645,7 @@ services:
 
   # Grafana — dashboards for Prometheus metrics
   grafana:
+    mem_limit: 512m
     image: grafana/grafana:latest
     ports:
       - "3000:3000"

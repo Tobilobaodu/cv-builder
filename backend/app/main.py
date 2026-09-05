@@ -209,16 +209,36 @@ async def correlation_id_middleware(request: Request, call_next):
     return response
 
 
-# Security response headers — this API only ever serves JSON, never HTML/
-# scripts/styles, so the strictest values are also the correct ones (no
-# page here should ever be framed, sniffed into a different content type,
-# or allowed to load any sub-resource).
+# Security response headers. The API itself only ever serves JSON, so the
+# strictest values are also the correct ones for every real endpoint: no
+# page should be framed, sniffed into another content type, or allowed to
+# load any sub-resource.
+#
+# The exception is the interactive documentation. /docs and /redoc are
+# genuine HTML pages that pull Swagger UI and ReDoc assets from a CDN, so
+# default-src 'none' renders them blank. Those two routes get a policy
+# permitting exactly those sub-resources and nothing more.
+_DOCS_PATHS = {"/docs", "/redoc", "/docs/oauth2-redirect"}
+
+_DOCS_CSP = (
+    "default-src 'none'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: https://fastapi.tiangolo.com; "
+    "font-src 'self' https://cdn.jsdelivr.net; "
+    "connect-src 'self'"
+)
+
+
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Content-Security-Policy"] = "default-src 'none'"
+    if request.url.path in _DOCS_PATHS:
+        response.headers["Content-Security-Policy"] = _DOCS_CSP
+    else:
+        response.headers["Content-Security-Policy"] = "default-src 'none'"
     return response
 
 
