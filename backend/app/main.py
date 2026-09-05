@@ -167,8 +167,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — in local dev, also allow null origin (file:// pages) for the test harness
-_cors_origins = [settings.cors_origin]
+# CORS — comma-separated, because the frontend is reachable under more than one
+# origin at once: its stable per-environment URL and, in local development, the
+# dev server. Deployment-specific URLs are deliberately not covered — their
+# hostname carries an incrementing deployment number, so no fixed value matches.
+# In local dev, also allow null origin (file:// pages) for the test harness.
+_cors_origins = [o.strip() for o in settings.cors_origin.split(",") if o.strip()]
 if settings.environment == "local":
     _cors_origins.append("null")
 
