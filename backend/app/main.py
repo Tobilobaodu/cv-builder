@@ -7,6 +7,7 @@ and the Celery workers (via app.workers.tasks.celery_app).
 
 import asyncio
 from contextlib import asynccontextmanager
+import os
 import uuid
 
 from fastapi import FastAPI, Request
@@ -20,6 +21,7 @@ from app.core.logging import setup_logging, get_logger
 from app.core import metrics as _metrics  # noqa: F401 — register Prometheus metrics
 from app.core.metrics import QUEUE_CONSUMERS_GAUGE, QUEUE_DEPTH_GAUGE
 from app.core.storage import ensure_bucket_exists
+from app.core.tracing import shutdown_tracing
 from app.db import async_session_factory
 from app.api.v1.auth import router as auth_router
 from app.api.v1.cvs import router as cvs_router
@@ -38,6 +40,27 @@ from app.api.v1.applications import router as applications_router
 from app.api.v1.job_feed import router as job_feed_router
 
 logger = get_logger(__name__)
+
+# Error tracking. Initialised at import time, before the app object and every
+# router above it can raise, because an exception thrown earlier than this call
+# is simply not captured. Temps is Sentry wire-compatible and injects both
+# SENTRY_DSN and SENTRY_RELEASE into each deployment, so there is nothing to
+# configure and no DSN belongs in this repository; where the variable is absent
+# sentry_sdk.init is a no-op and the process runs untraced.
+#
+# `release` is deliberately not passed: the SDK reads SENTRY_RELEASE itself,
+# and hardcoding one breaks the dashboard's ability to map a stack frame back
+# to its source. send_default_pii stays off so request headers, cookies and
+# bodies — which on this API carry CVs, cover letters and auth tokens — are
+# never shipped to the error backend.
+if settings.error_tracking_enabled and os.getenv("SENTRY_DSN"):
+    import sentry_sdk
+
+    sentry_sdk.init(
+        environment=settings.environment,
+        send_default_pii=False,
+        traces_sample_rate=0.0,  # traces go via OTLP (app/core/tracing.py), not Sentry
+    )
 
 
 _QUEUE_DEPTH_POLL_SECONDS = 15
@@ -157,6 +180,9 @@ async def lifespan(app: FastAPI):
     yield
     queue_depth_task.cancel()
     queue_consumer_task.cancel()
+    # Spans batched but not yet exported are lost if the process exits without
+    # this, and Temps allows ten seconds between SIGTERM and kill.
+    shutdown_tracing()
     logger.info("app_shutting_down")
 
 
@@ -166,6 +192,16 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Request-level spans. `excluded_urls` is matched against the URL, so the
+# health path named in .temps.yaml and the Prometheus scrape target are both
+# kept out: Temps probes /health and Prometheus polls /metrics on fixed
+# intervals, and neither says anything about real traffic — left in, they
+# would be the overwhelming majority of every trace list.
+if settings.otel_traces_enabled:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+    FastAPIInstrumentor.instrument_app(app, excluded_urls="health,metrics")
 
 # CORS — comma-separated, because the frontend is reachable under more than one
 # origin at once: its stable per-environment URL and, in local development, the

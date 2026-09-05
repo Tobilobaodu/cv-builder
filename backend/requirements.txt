@@ -39,6 +39,14 @@ structlog==24.4.0
 prometheus-client==0.21.1
 opentelemetry-api==1.44.0
 opentelemetry-sdk==1.44.0
+# OTLP/HTTP protobuf export to Temps, plus request-level spans. The
+# instrumentation packages version independently of the core SDK: 0.65b0 is
+# the release built against 1.44.0, so these three move together.
+opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-instrumentation-fastapi==0.65b0
+# Error tracking. Temps is Sentry wire-compatible and injects SENTRY_DSN and
+# SENTRY_RELEASE into every deployment, so there is no DSN to configure here.
+sentry-sdk[fastapi]==2.68.1
 
 # Testing
 pytest==9.1.1

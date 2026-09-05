@@ -190,7 +190,16 @@ class Settings(BaseSettings):
     # app/core/metrics_push.py.
     pushgateway_url: str = "http://pushgateway:9091"
 
-    # CORS
+    # Observability. The platform supplies the destinations — a Temps
+    # deployment arrives with OTEL_EXPORTER_OTLP_* and SENTRY_DSN already in
+    # its environment — so these switches only decide whether this process
+    # uses them, matching the kill-switch posture of the LLM features above.
+    # Both are inert wherever those variables are absent (local runs, tests),
+    # so leaving them on does not force a network dependency.
+    otel_traces_enabled: bool = True
+    error_tracking_enabled: bool = True
+
+    # CORS — accepts a comma-separated list; see app/main.py.
     cors_origin: str = "http://localhost:3000"
 
     model_config = {"env_file": ".env.local", "env_file_encoding": "utf-8"}
