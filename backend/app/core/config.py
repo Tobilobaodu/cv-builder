@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     # Extraction service — hosts Example's routes/extract.ts unchanged and
     # replaces decommissioned steps 3-6. Reachable on the no_internet
     # network only; it needs no egress.
+    # 5050 is what docker-compose.yml asks the extraction service to listen on,
+    # and is correct for a local `docker compose up`. It is NOT correct on a
+    # platform that injects its own PORT into every compose service — Temps
+    # does, so the service there listens on the injected port instead and this
+    # default dials a closed one, failing extraction with "Connection refused".
+    # Deployed environments must therefore set EXTRACTION_SERVICE_URL to match
+    # whatever port the platform actually assigned.
     extraction_service_url: str = "http://extraction:5050"
     extraction_service_timeout_seconds: int = 120
 
